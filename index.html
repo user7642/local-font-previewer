@@ -6,8 +6,8 @@
 <title>Xem trước font trong máy</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%232563eb'/%3E%3Ctext x='32' y='46' font-family='Georgia,serif' font-size='38' font-weight='700' text-anchor='middle' fill='white'%3EAa%3C/text%3E%3C/svg%3E">
 <style>
-:root{--bg:#fff;--panel:#f3f4f6;--card:#fff;--line:#d4d7dd;--text:#15171a;--mute:#6b7280;--acc:#2563eb;--chip:#e6e8ec;--onacc:#fff;--dl:#16a34a}
-@media (prefers-color-scheme:dark){:root{--bg:#131416;--panel:#1d1f23;--card:#131416;--line:#33363c;--text:#ececec;--mute:#9aa0a8;--acc:#8ab4ff;--chip:#2a2d33;--onacc:#0b1220;--dl:#4ade80}}
+:root{--bg:#fff;--panel:#f3f4f6;--card:#fff;--line:#d4d7dd;--text:#15171a;--mute:#6b7280;--acc:#2563eb;--chip:#e6e8ec;--onacc:#fff;--dl:#16a34a;--miss:#b45309}
+@media (prefers-color-scheme:dark){:root{--bg:#131416;--panel:#1d1f23;--card:#131416;--line:#33363c;--text:#ececec;--mute:#9aa0a8;--acc:#8ab4ff;--chip:#2a2d33;--onacc:#0b1220;--dl:#4ade80;--miss:#fbbf24}}
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--text);font:15px/1.4 system-ui,sans-serif}
 .layout{display:grid;grid-template-columns:280px 1fr;min-height:100vh}
@@ -84,6 +84,10 @@ details.dlset{border:1px solid var(--line);border-radius:12px;padding:10px 12px;
 #dlopen:hover{border-color:var(--dl)}
 .cp{font:inherit;font-size:12px;padding:4px 8px;border-radius:7px;border:1px solid var(--line);background:none;color:var(--text);cursor:pointer;white-space:nowrap}
 .cp:hover{border-color:var(--acc);color:var(--acc)}
+.cp.miss{color:var(--miss);border-color:var(--miss)}
+.cp.on{background:var(--acc);color:var(--onacc);border-color:var(--acc)}
+.cp:disabled{opacity:.4;cursor:default}
+.dlbar{display:flex;justify-content:space-between;align-items:center;gap:6px;flex-wrap:wrap}
 .sample{margin-top:12px;font-size:var(--fs,40px);line-height:1.25;overflow-wrap:anywhere;white-space:pre-wrap}
 #grid.row .sample{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 @media (max-width:820px){.layout{grid-template-columns:1fr}aside{position:static;height:auto;border-right:0;border-bottom:1px solid var(--line)}}
@@ -176,7 +180,7 @@ details.dlset{border:1px solid var(--line);border-radius:12px;padding:10px 12px;
     <button id="dlclose" type="button" aria-label="Đóng">✕</button>
   </div>
   <div id="dlbody">
-    <div class="dlbtns"><button class="cp" id="dlcopy" type="button">Chép danh sách</button><button class="cp" id="dldown" type="button">Tải .txt</button></div>
+    <div class="dlbar"><span class="dlbtns"><button class="cp" id="dlcopy" type="button">Chép danh sách</button><button class="cp" id="dldown" type="button">Tải .txt</button></span><button class="cp" id="dlmiss" type="button" hidden>Chưa cài</button></div>
     <details class="dlset" id="dldet">
       <summary>Google Drive · <span id="dlstat">chưa kết nối</span></summary>
       <ol class="dlsteps">
@@ -208,7 +212,7 @@ try{favs=new Set(JSON.parse(localStorage.getItem('fontFav')||'[]'))}catch{}
 try{bads=new Set(JSON.parse(localStorage.getItem('fontBad')||'[]'))}catch{}
 let tags={};try{tags=JSON.parse(localStorage.getItem('fontTags')||'{}')}catch{}
 const saveTags=()=>{try{localStorage.setItem('fontTags',JSON.stringify(tags))}catch{}};
-let dls=new Set(),cfg={},dlVer=0,dlTimer=null;
+let dls=new Set(),cfg={},dlVer=0,dlTimer=null,dlOnly=false;
 try{dls=new Set(JSON.parse(localStorage.getItem('fontDl')||'[]'))}catch{}
 try{cfg=JSON.parse(localStorage.getItem('fontDlCfg')||'{}')}catch{}
 const saveLists=()=>{try{localStorage.setItem('fontFav',JSON.stringify([...favs]));localStorage.setItem('fontBad',JSON.stringify([...bads]))}catch{}};
@@ -335,7 +339,7 @@ async function loadFonts(auto){
     status.textContent='Đang đọc danh sách font…';
     closeDrawer();fams=group(await window.queryLocalFonts());
     if(!auto){cache={};fcache={}}            // bấm tay = phân tích lại từ đầu
-    await analyse();$('load').textContent='Đọc lại font';render();
+    await analyse();$('load').textContent='Đọc lại font';render();if(!dlDrawer.hidden)renderDl();
   }catch(e){
     if(auto){status.textContent='Bấm “Cấp quyền đọc font” để tải danh sách.';return}
     status.textContent=e.name==='NotAllowedError'?'Quyền đọc font bị từ chối. Tải lại trang và bấm Cho phép (hoặc bật quyền Fonts trong cài đặt trang web).':'Lỗi: '+e.message;
@@ -440,13 +444,23 @@ function dlChanged(){
 }
 function dlCfgUI(){$('dlsync').hidden=$('dldisc').hidden=!cfg.url}
 function renderDl(){
-  const L=dlList();$('dlsub').textContent=L.length+' font';
+  const all=dlList(),known=fams.length>0;
+  const inst=new Set(fams.map(f=>f.family.toLowerCase()));
+  const miss=n=>known&&!inst.has(n.toLowerCase());
+  const nMiss=all.filter(miss).length;
+  const L=dlOnly&&known?all.filter(miss):all;
+  $('dlsub').textContent=all.length+' font'+(known?' · '+nMiss+' chưa cài':'');
+  const mb=$('dlmiss');mb.hidden=!known;mb.textContent='Chưa cài ('+nMiss+')';
+  mb.classList.toggle('on',dlOnly&&known);mb.disabled=!nMiss&&!dlOnly;
   const frag=document.createDocumentFragment();
-  if(!L.length){const p=document.createElement('p');p.className='note';p.textContent='Chưa có font nào. Bấm chuột phải vào một font rồi chọn “Lưu để tải lại”.';frag.appendChild(p)}
+  if(!L.length){const p=document.createElement('p');p.className='note';
+    p.textContent=all.length?'Tất cả font trong danh sách đã cài trên máy này.':'Chưa có font nào. Bấm chuột phải vào một font rồi chọn “Lưu để tải lại”.';frag.appendChild(p)}
   for(const n of L){
     const r=document.createElement('div');r.className='dr';r.dataset.name=n;
     r.innerHTML='<div class="meta"><b></b><span><button class="cp" data-a="copy" type="button" title="Chép tên để dán vào ô tìm kiếm">Chép</button><button class="cp" data-a="gf" type="button" title="Mở Google Fonts với tên này">Google Fonts</button><button class="cp" data-a="rm" type="button" title="Bỏ khỏi danh sách" aria-label="Bỏ khỏi danh sách">✕</button></span></div>';
-    r.querySelector('b').textContent=n;frag.appendChild(r);
+    r.querySelector('b').textContent=n;
+    if(miss(n)){const g=r.querySelector('[data-a="gf"]');g.classList.add('miss');g.title='Chưa cài trên máy này — mở Google Fonts để tải'}
+    frag.appendChild(r);
   }
   $('dllist').replaceChildren(frag);
 }
@@ -512,6 +526,7 @@ function doPost(e) {
 `;
 $('dlopen').onclick=()=>dlDrawer.hidden?openDl():closeDl();
 $('dlclose').onclick=closeDl;
+$('dlmiss').onclick=()=>{dlOnly=!dlOnly;renderDl()};
 $('dlcopy').onclick=async e=>{const b=e.currentTarget;try{await navigator.clipboard.writeText(dlList().join('\n'))}catch{}flash(b,'Đã chép')};
 $('dldown').onclick=()=>{
   const a=document.createElement('a');
